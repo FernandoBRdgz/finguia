@@ -17,6 +17,7 @@ model_openai = "gpt-5-mini"
 model_deepseek = "deepseek-chat"
 model_transcribe = "whisper-1"
 model_transcribe = "gpt-4o-mini-transcribe"
+model_tts = "gpt-4o-mini-tts"
 
 st.title("📊 FinguIA")
 st.caption("💰 Inversiones simplificadas.")
@@ -81,3 +82,17 @@ if user_prompt:
         response = st.write_stream(stream)
 
     st.session_state.messages.append({"role": "assistant", "content": response})
+
+    audio_bytes = None
+    with st.spinner("Generando respuesta en audio..."):
+        try:
+            speech = client_openai.audio.speech.create(model=model_tts, voice="ash", input=response)
+            audio_bytes = speech.read()
+            if not audio_bytes:
+                st.info("No se pudo obtener audio para esta respuesta.")
+        except Exception as exc:
+            st.error(f"No se pudo generar la voz sintética: {exc}")
+    
+    st.audio(audio_bytes, format="audio/mp3", start_time=0, sample_rate=None, end_time=None, loop=False, autoplay=True, width="stretch")
+
+    st.session_state.messages.append({"role": "assistant", "content": response, "audio": audio_bytes})
