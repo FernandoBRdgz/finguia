@@ -14,7 +14,6 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
 model_openai = "gpt-5.1"
 model_transcribe = "whisper-1"
-# model_transcribe = "gpt-4o-mini-transcribe"
 model_tts = "gpt-4o-mini-tts"
 
 st.title("📊 FinguIA")
