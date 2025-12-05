@@ -16,6 +16,32 @@ model_openai = "gpt-5.1"
 model_transcribe = "whisper-1"
 model_tts = "gpt-4o-mini-tts"
 
+
+
+# funcion auxiliar para streaming
+def stream_assistant_answer(client, model, conversation):
+    """
+    Llama al modelo con stream=True y pinta la respuesta progresivamente.
+    Devuelve el texto completo generado.
+    """
+    full_response = ""
+    placeholder = st.empty()
+
+    stream = client.chat.completions.create(
+        model=model,
+        messages=conversation,
+        stream=True,
+    )
+
+    for chunk in stream:
+        delta = chunk.choices[0].delta
+        if delta and delta.content:
+            full_response += delta.content
+            placeholder.markdown(full_response)
+
+    return full_response
+
+
 st.title("📊 FinguIA")
 st.caption("💰 Inversiones simplificadas.")
 
@@ -72,53 +98,62 @@ if user_prompt:
     st.session_state.messages.append({"role": "user", "content": user_prompt})
     st.chat_message("user").write(user_display_content or user_prompt)
     conversation = [{"role": "assistant", "content": stronger_prompt}]
-    conversation.extend({"role": m["role"], "content":m["content"]} for m in st.session_state.messages)
+    conversation.extend({"role": m["role"], "content": m["content"]} for m in st.session_state.messages)
 
     done = False
+    last_non_stream_response = ""
+
     while not done:
-        with st.chat_message("assistant"):
-            completion = client_openai.chat.completions.create(
-                model = model_openai,
-                messages = conversation,
-                tools = tools,
+        completion = client_openai.chat.completions.create(
+            model=model_openai,
+            messages=conversation,
+            tools=tools,
+        )
+        choice = completion.choices[0]
+        message = choice.message
+        finish_reason = choice.finish_reason
+
+        if finish_reason == "tool_calls" and message.tool_calls:
+            tool_calls = message.tool_calls
+            tool_calls_serialized = [
+                {
+                    "id": tc.id,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                    "type": tc.type,
+                }
+                for tc in tool_calls
+            ]
+            results = handle_tool_calls(tool_calls)
+            safe_content = message.content or ""
+            if safe_content:
+                st.session_state.messages.append({"role": message.role, "content": safe_content})
+            conversation.append(
+                {
+                    "role": message.role,
+                    "content": safe_content,
+                    "tool_calls": tool_calls_serialized,
+                }
             )
-            choice = completion.choices[0]
-            message = choice.message
-            finish_reason = choice.finish_reason
+            conversation.extend(results)
+            continue
 
-            if finish_reason == "tool_calls" and message.tool_calls:
-                tool_calls = message.tool_calls
-                tool_calls_serialized = [
-                    {
-                        "id": tc.id,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                        "type": tc.type,
-                    }
-                    for tc in tool_calls
-                ]
-                results = handle_tool_calls(tool_calls)
-                safe_content = message.content or ""
-                if safe_content:
-                    st.session_state.messages.append({"role": message.role, "content": safe_content})
-                conversation.append(
-                    {
-                        "role": message.role,
-                        "content": safe_content,
-                        "tool_calls": tool_calls_serialized,
-                    }
-                )
-                conversation.extend(results)
-                continue
+        # Se separa la llamada de tools del stream final
+        last_non_stream_response = message.content or ""
+        done = True
 
-            done = True
-            response = message.content or ""
-            st.write(response)
+
+    # Se hace una nueva llamada al api pero esta ves se activa el modo stream
+    with st.chat_message("assistant"):
+        response = stream_assistant_answer(
+            client=client_openai,
+            model=model_openai,
+            conversation=conversation,
+        )
 
     st.session_state.messages.append({"role": "assistant", "content": response})
-
     audio_bytes = None
     with st.spinner("Generando respuesta en audio..."):
         try:
